@@ -1,0 +1,16 @@
+[project]
+name = "agentpay"
+version = "0.1.0"
+description = "Rail-agnostic ценообразование и авторизация вызовов AI-агентов"
+requires-python = ">=3.11"
+dependencies = []
+
+[project.scripts]
+agentpay = "agentpay.cli:main"
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+include = ["agentpay*"]

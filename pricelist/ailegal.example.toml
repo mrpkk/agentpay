@@ -1,0 +1,51 @@
+# ПРИМЕР каталога — для локальных замеров и тестов, НЕ для продаж.
+#
+# Числа здесь условные и подобраны так, чтобы показать порядок величин.
+# `verified_on` намеренно пуст: каталог остаётся неподтверждённым, поэтому
+# продажа по нему блокируется, а локальный замер требует явного
+# `--allow-unverified`.
+#
+# Отличие от `ailegal.toml`: там тарифы нулевые-заглушки, здесь — примерные
+# рыночные значения. Публичный прайс требует настоящих тарифов с датой и
+# ссылкой на источник.
+
+currency = "USD"
+market_origin = "INT"
+target_margin = 0.60
+minor_unit = 0.01
+
+[rates]
+# EXAMPLE ONLY — не проверено, не для продаж
+usd_per_million_tokens = 0.30
+usd_per_cpu_hour = 0.05
+usd_per_megabyte_out = 0.09
+usd_per_storage_write = 0.005
+usd_per_external_call = 0.002
+verified_on = ""
+source = "EXAMPLE — условные значения для демонстрации, не источник"
+
+[[items]]
+name = "ailegal.clause.risk"
+description = "Risk Aggregation 2.0 по готовому списку клауз (document_risk_v2)"
+cpu_seconds = 0.0004
+bytes_out = 600
+scheme = "exact"
+tags = ["legal", "deterministic", "offline"]
+
+[[items]]
+name = "ailegal.clause.categorize"
+description = "ClauseDNA 3.0: категоризация клауз по таблице типов"
+cpu_seconds = 0.0002
+bytes_out = 400
+scheme = "exact"
+tags = ["legal", "deterministic", "offline"]
+
+[[items]]
+name = "ailegal.clause.extract"
+description = "Извлечение клауз из договора через LLM (GigaChat)"
+cpu_seconds = 0.9
+bytes_out = 24000
+external_calls = 1
+scheme = "upto"
+requires_provider = "gigachat"
+tags = ["legal", "llm", "network"]
