@@ -1,258 +1,62 @@
 # agentpay
 
-Rail-agnostic ядро ценообразования и авторизации вызовов AI-агентов.
-Реализует Часть VIII.3 и VIII.7 `GOD_ROADMAP_v4.md` как код, а не как прозу.
+Rail-agnostic core for pricing and authorising AI-agent calls.
 
+## The problem it solves
 
+The price of an agent call is set by guesswork and welded to one payment rail.
+The cost is never measured, the margin does not follow from a formula, and
+switching rails (x402 ↔ AP2 ↔ mock) breaks the core.
 
-## Что это и какую проблему решает
+This is the opposite: **the price is computed from what the call actually
+consumed**, and the rail only verifies and transfers. A rail change touches
+one file.
 
-Цена вызова агента назначается на глаз и привязана к одной платёжной
-сети. Себестоимость не измеряется, маржа не выводится из формулы,
-смена рельса (x402 ↔ AP2 ↔ MOCK) ломает ядро.
-`agentpay` — rail-agnostic ядро: цена = ceil(себестоимость / (1 − маржа)),
-смена рельса не влияет ни на цену, ни на ядро.
+## Honest cost allocation
 
-## Как запустить
+Cost breaks down into components that can each be measured:
 
-```bash
-python3 -m pip install -e . --user --break-system-packages
-python3 -m agentpay.cli price    # каталог и диагностика маржи
-python3 -m agentpay.cli rails    # доступные адаптеры
-```
+| Component | Unit |
+|---|---|
+| `tokens` | per million |
+| `cpu_seconds` | per CPU-hour |
+| `bytes_out` | per megabyte |
+| `storage_writes` | per write |
+| `external_calls` | per call |
 
-## Как использовать агентом
+CPU time is measured as **process time**, not wall clock: waiting on the
+network is not our cost and must not land in the customer's bill.
 
-Агент читает SKILL.md и спрашивает цену у ядра вместо того, чтобы
-придумывать её: agentpay.price(item) возвращает цену и разбор
-себестоимости по компонентам. Оплата — через выбранный рельс-адаптер.
-
-## Что НЕ готово (честно)
-
-- Тарифы GigaChat/хостинга в каталоге = PLACEHOLDER, печатается PRICE TO VERIFY.
-- Минимальная единица $0,01 завышает цену дешёвых ядер в 200–300 раз
-  (рельс 99,5%) — это ошибка ценообразования, не успех.
-- Публичный прайс не опубликован: x402-валидация из РФ геоблокирована.
-
-## Зачем
-
-Цена не назначается «на глаз» и не привязана к одной платёжной сети. Себестоимость
-вызова раскладывается на измеримые компоненты, цена выводится из маржи, а расчётная
-сеть подключается адаптером. Смена рельса (x402 ↔ мандат AP2 ↔ MOCK) не требует
-правок ядра и не влияет на цену.
-
-## Цена
+## Try it
 
 ```
-МАРЖА   = (ЦЕНА − СЕБЕСТОИМОСТЬ) / ЦЕНА
-ЦЕНА    = ceil(СЕБЕСТОИМОСТЬ / (1 − TARGET_MARGIN), минимальная единица)
+curl -X POST https://rta.lat/agentpay/quote \
+  -H 'Content-Type: application/json' \
+  -d '{"tokens":1200,"cpu_seconds":0.4,"bytes_out":2048}'
 ```
 
-Делить на саму маржу нельзя: `с / 0.60` даёт маржу 0.40, а не 0.60. Округление
-строго вверх, поэтому фактическая маржа никогда не опускается ниже целевой.
-Регрессия закреплена тестом.
+The response carries the breakdown, the cost, the price and `pricing_verified`.
 
-## Установка
+## `pricing_verified`
 
-```bash
-cd /home/iamthat/Документы/work/sales/agentpay
-python3 -m pip install -e . --user --break-system-packages
-```
+The rate card carries a source and a date. If either is missing, the API
+reports `pricing_verified: false` rather than letting a made-up number pass as
+a market price.
 
-Тот же механизм, что у соседнего `attest`. Без установки пакет запускается
-модулем: `python3 -m agentpay.cli ...`.
+The shipped card is checked against OpenAI's published token pricing,
+Hetzner's cloud pricing, AWS CloudFront egress and S3 storage. Prices move, so
+the date is part of the answer.
 
-## CLI
+## An honest note on the rate card
 
-```bash
-export AGENTPAY_SECRET=...        # ключ выпуска котировок
-export AGENTPAY_SALT=vendor-01    # идентификатор продавца для адреса авторизации
+The card was originally a placeholder — and it also had a unit error: `$0.09
+per megabyte` is `$90 per gigabyte`, while real egress costs about `$0.09/GB`.
+That thousand-fold error went straight into the customer's bill. Both are
+fixed, and a test now fails if the source or date are emptied again.
 
-python3 -m agentpay.cli price                       # каталог и диагностика маржи
-python3 -m agentpay.cli rails                       # доступные адаптеры
-python3 -m agentpay.cli catalog pricelist/ailegal.example.toml
-python3 -m agentpay.cli golden                      # 50/50 на золотом корпусе AILegal
-python3 -m agentpay.cli run ailegal.clause.risk --ledger l.jsonl
-python3 -m agentpay.cli ledger l.jsonl
-python3 -m agentpay.cli quote clause.extract --verify
-python3 -m agentpay.cli quote clause.extract --rail x402 --scheme upto --settle 0.012
-```
+## Public repo
 
-Ключ проверки можно задать отдельно — продавец подписывает, рельс верифицирует
-своим ключом:
+<https://github.com/mrpkk/agentpay>
 
-```bash
-python3 -m agentpay.cli quote clause.extract --verify --verify-secret <ключ-рельса>
-```
-
-При несовпадении ключей вердикт `reject` и код возврата 1.
-
-## Модель авторизации
-
-Котировка подписана HMAC-SHA256 по канонической сериализации и привязана к
-конкретному ресурсу, одноразовому nonce и сроку действия. Проверка идёт от дешёвой
-и необратимой к дорогой: подпись → срок → одноразовость → соответствие каталогу.
-
-Вердикт всегда из закрытого набора `accept | review | reject`:
-
-- `accept` — всё сходится;
-- `review` — расхождение, которое человек решает (например, сумма ниже
-  каталожной: это может быть честная скидка, а может быть попытка получить
-  бесплатный вызов);
-- `reject` — подделка, просрочка, replay, попытка навязать цену или рельс.
-
-## Рельсы
-
-| Рельс | Схема | Применение |
-|-------|-------|-----------|
-| `x402` | HTTP-native, `exact` / `upto` | микроплатежи, «попробовать без аккаунта» |
-| `mandate` | AP2-подобный, многоразовый | авторизация намерения с лимитом расхода |
-| `mock` | офлайн | тесты: доказательство, что ядро не протекает ни в одну сеть |
-
-`mandate` намеренно многоразовый, поэтому одноразовость nonce к нему не
-применяется — вместо неё работают суммарный лимит и `review` при повторном
-предъявлении одной котировки.
-
-## Захват авторизации до исполнения
-
-Проверка сама по себе не запрещает исполнение: она лишь сообщает, что
-авторизация в момент чтения ещё не была занята. Решение принимает **рельс**
-(`rail.authorize`), и оно действует **до** запуска ядра — контур проверяет
-котировку не в обход рельса, иначе лимиты мандата остались бы мёртвым кодом.
-
-| Рельс | Что занимает | Что освобождает при сбое |
-|-------|--------------|---------------------------|
-| `x402`, `mock` | nonce, атомарно (`claim`) | `rail.release()` |
-| `mandate` | сумму в лимите, резервом | `rail.release()` возвращает резерв |
-
-`claim` атомарен: `seen` + `remember` — две неатомарные операции, между
-которыми второй вызов успевает увидеть «свободно» и выполнить работу дважды.
-Резерв мандата учитывает и нерассчитанные авторизации: считать только
-потраченное нельзя, иначе десяток параллельных вызовов проходит одну и ту же
-проверку на полном остатке.
-
-Если работа не выполнилась, авторизация не израсходована — покупатель не
-платит за попытку. То же верно для повторного расхода одного ресурса: дубль
-отсекается до запуска ядра, под блокировкой, удерживаемой до конца расчёта.
-
-## Каталоги и запрет продажи по неподтверждённой цене
-
-Каталоги лежат в `pricelist/`:
-
-| Файл | Назначение |
-|------|------------|
-| `ailegal.toml` | тарифы-заглушки: цена выходит нулевой, продажа **запрещена** |
-| `ailegal.example.toml` | условные примеры для замеров, требует `--allow-unverified` |
-
-Неподтверждённые тарифы (пустые `verified_on` или `source`) дают нулевую
-себестоимость и нулевую цену. Чтобы прайс-заглушка не выглядел рабочим,
-`PaidCall.run()` отказывается продавать **до** выполнения ядра:
-
-```bash
-$ python3 -m agentpay.cli run ailegal.clause.risk --catalog pricelist/ailegal.toml
-ОТКАЗ: тарифы не подтверждены источником и датой: цена выведена из
-нулевой себестоимости и равна нулю.
-$ echo $?
-3
-```
-
-Публичный прайс требует заполненных `verified_on` и `source` в `[rates]`.
-
-## Интеграция с AILegal
-
-Загружается **настоящее** ядро AILegal, без заглушек: `clause_dna.py`
-(72 типа, 10 категорий) и `risk_aggregation.py` (`document_risk_v2`).
-Если модули исчезли или потеряли структуру — падение `CoreUnavailable`.
-Молчаливая подмена ядра невозможна.
-
-```bash
-python3 -m agentpay.cli golden    # 50/50 на реальном golden.json
-```
-
-Полный путь одного вызова: каталог → котировка → проверка подписи **до**
-исполнения → измерение → расчёт → квитанция в журнале.
-
-Позиция `ailegal.clause.extract` помечена `requires_provider = "gigachat"`:
-без реального провайдера она **не продаётся** — вызов падает с
-`ProviderUnavailable` до котировки, и деньги за него не берутся.
-
-Поле `requires_provider` — не украшение, а проверка в денежном пути.
-Позиция, которой нужен внешний провайдер, обязана быть названа в
-`available_providers` того, кто её исполняет; иначе отказ. Платить за
-извлечение клауз и получать агрегацию риска по готовому списку — не
-«приближение», а подмена услуги.
-
-## Что контур исполняет на самом деле
-
-| Позиция | Работа | Провайдер |
-|---------|--------|-----------|
-| `ailegal.clause.risk` | `document_risk_v2` по списку клауз | нет |
-| `ailegal.clause.categorize` | `ClauseDNA.CLAUSE_CATEGORY` | нет |
-| `ailegal.clause.extract` | извлечение из текста договора | `gigachat` |
-
-Позиция вне этой таблицы отклоняется с кодом 6: несуществующее исполнение
-не подменяется соседним. Код 7 означает, что провайдер объявлен, но не
-подключён.
-
-## Защиты денежного пути
-
-| Защита | Что ловит | Код возврата |
-|--------|-----------|--------------|
-| Отказ по неподтверждённому тарифу | продажа по цене $0 | 3 |
-| Запрет двойного списания | повтор той же котировки | 4 |
-| Ядро недоступно | подмена на заглушку | 5 |
-| Привязка к ресурсу | котировка на чужой документ | `reject` |
-| Одноразовость nonce | replay (`x402` / `exact`) | `reject` |
-| Лимит мандата | перерасход разрешения | `review` / `reject` |
-| Провайдерный гейт | продажа позиции без внешнего провайдера | 7 |
-| Таблица исполнения | подмена работы на соседнюю | 6 |
-
-## Продакшн-замечания
-
-- `MemoryNonceStore` годен только для процесса: для нескольких воркеров нужен
-  общий стор (Redis, БД) — иначе replay-гарантия не держится.
-- `Ledger` защищён от гонки внутри процесса (проверка дубля и запись под одной
-  блокировкой), но не между процессами: перед продакшеном нужен файловый
-  (`fcntl`/`O_EXCL`) или иной межпроцессный блокирующий.
-- `PaidCall` держит по блокировке на каждый ресурс, поэтому словарь блокировок
-  растёт вместе с числом ресурсов. Для долгоживущего процесса его нужно чистить.
-- `AGENTPAY_SECRET` в проде только из окружения или хранилища секретов.
-- Тарифы в `RateCard` без `verified_on` и `source` помечаются `PRICE TO VERIFY`
-  и печатают предупреждение: цена на неподтверждённой себестоимости — гипотеза.
-- `test_integration.py` падает, если AILegal недоступен. Это осознанно: молчащая
-  подмена ядра в тесте денежного пути опаснее упавшего теста.
-- Добавление рельса — отдельный слайс: тесты + запись в `docs/DECISIONS.md`.
-
-## Тесты
-
-```bash
-cd /home/iamthat/Документы/work/sales/agentpay && python3 -m pytest tests/ -q
-```
-
-101 тест. Приоритет — негативные случаи: подделка подписи, replay, истечение
-срока, превышение потолка, чужой рельс, занижение цены, двойное списание,
-продажа по неподтверждённому тарифу. Тесты герметичны: результат не зависит от
-переменных окружения.
-
----
-<!-- SPONSOR-BLOCK -->
----
-
-## 🤝 На сок
-
-Этот проект — open-source. Если он оказался полезен, поддержать можно криптой
-(USDC, сеть **Base**) — без карты и без регистрации, как и сам проект рассчитывается:
-
-| Сеть | Кошелёк | Ручной перевод (BaseScan) |
-|---|---|---|
-| Base (USDC) | `0xc1a411f2cb5e31c2baa6f184e627715925104318` | [открыть](https://basescan.org/address/0xc1a411f2cb5e31c2baa6f184e627715925104318) |
-
-**Проще:** кнопка спонсорства GitHub — [Sponsor](https://github.com/sponsors/mrpkk)
-
-Open Collective / Patreon — по желанию, привязывается позже.
-
----
-
-*Проект открыт. Код можно читать, проверять, форкать и использовать.
-Спонсор не даёт никаких прав на код — код уже свободен по лицензии Apache-2.0.*
-<!-- /SPONSOR-BLOCK -->
+Part of the Indra set — six small services for agents that have to be
+trusted: <https://indra.rta.lat>
