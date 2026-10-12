@@ -47,16 +47,31 @@ class TestCatalog:
         assert "clause.extract" in out
         assert "маржа" in out
 
-    def test_demo_rates_are_not_claimed_verified(self) -> None:
-        """Демо-каталог не имеет источника, поэтому обязан ругаться."""
-        code, out = run_text("price")
-        assert "PRICE TO VERIFY" in out
-        assert demo_pricelist().unverified_rates() is True
+    def test_rates_carry_source_and_date(self) -> None:
+        """Тариф помечен как подтверждённый — значит источник и дата есть.
+
+        Обратная проверка: если поля снова опустеют, тест упадёт. Это
+        защита от тихого возврата к выдуманным ценам.
+        """
+        rates = demo_pricelist().rates
+        assert rates.verified_on.strip()
+        assert rates.source.strip()
+        assert rates.is_verified is True
+        assert demo_pricelist().unverified_rates() is False
+
+    def test_unverified_rates_are_flagged(self) -> None:
+        """Пустой источник обязан давать PRICE TO VERIFY, а не молчать."""
+        blank = demo_pricelist().rates.__class__(
+            **{**demo_pricelist().rates.__dict__,
+               "verified_on": "", "source": ""})
+        listing = demo_pricelist()
+        object.__setattr__(listing, "rates", blank)
+        assert listing.unverified_rates() is True
 
     def test_price_json_shape(self) -> None:
         code, out = run("price", "--format", "json")
         assert code == 0
-        assert out["rates_verified"] is False
+        assert out["rates_verified"] is True
         assert set(out["prices"]) == {
             "clause.extract",
             "defi.snapshot",

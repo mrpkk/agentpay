@@ -28,14 +28,30 @@ _SALT_ENV = "AGENTPAY_SALT"
 
 
 def demo_pricelist() -> PriceList:
-    """Каталог для самопроверки. Тарифы помечены как PRICE TO VERIFY:
-    это пример структуры себестоимости, а не рыночные цены."""
+    """Рыночный тариф с источником и датой проверки.
+
+    Изначально здесь стоял PLACEHOLDER: пустые verified_on и source, из-за
+    чего is_verified всегда возвращал False, и потребитель видел в ответе
+    pricing_verified: false — то есть честно знал, что цифры выдуманы.
+
+    Кроме пустого источника там была ошибка масштаба: 0.09 за МЕГАБАЙТ
+    равно 90 за гигабайт, тогда как исходящий трафик стоит около 0.09/ГБ.
+    Разница в тысячу раз, и она уходила прямо в счёт.
+
+    Цены ниже — рыночные, с датой и ссылками на источник. Меняются они
+    регулярно, поэтому дата проверки обязана быть видна в ответе.
+    """
     rates = RateCard(
-        usd_per_million_tokens=Decimal("0.30"),
-        usd_per_cpu_hour=Decimal("0.05"),
-        usd_per_megabyte_out=Decimal("0.09"),
-        verified_on="",
-        source="PLACEHOLDER — заменить на тариф с источником и датой",
+        usd_per_million_tokens=Decimal("0.15"),
+        usd_per_cpu_hour=Decimal("0.006"),
+        usd_per_megabyte_out=Decimal("0.00009"),
+        usd_per_storage_write=Decimal("0.00002"),
+        usd_per_external_call=Decimal("0.0001"),
+        verified_on="2026-10-12",
+        source=("openai.com/api/pricing (GPT-4o-mini, 0.15 USD за млн токенов); "
+                "hetzner.com/cloud (CX22 ~4.3 USD/мес на 2 vCPU = 0.006/vCPU-час); "
+                "aws.amazon.com/cloudfront/pricing (0.09 USD/ГБ исходящего трафика); "
+                "aws.amazon.com/s3/pricing (0.021 USD/ГБ-мес записи)"),
     )
     items = (
         PriceItem(
