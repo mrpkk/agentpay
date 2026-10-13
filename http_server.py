@@ -119,8 +119,24 @@ class Handler(BaseHTTPRequestHandler):
                 "currency": pl.currency,
                 "target_margin": str(pl.target_margin),
                 "verified": pl.rates.is_verified,
+                # Сериализуем по фактическим полям PriceItem: у модели
+                # `usage` — разложение себестоимости, а полей `rate`/`unit`
+                # не существует. Старая версия читала их и падала
+                # AttributeError, а покупатель видел 502 на /pricing.
                 "items": [
-                    {"name": i.name, "rate": str(i.rate), "unit": i.unit}
+                    {
+                        "name": i.name,
+                        "description": i.description,
+                        "cost": str(pl.cost_of(i.name)),
+                        "price": str(pl.price_of(i.name)),
+                        "margin": str(pl.margin_of(i.name)),
+                        "usage": {
+                            "tokens": str(i.usage.tokens),
+                            "cpu_seconds": str(i.usage.cpu_seconds),
+                            "bytes_out": str(i.usage.bytes_out),
+                            "external_calls": str(i.usage.external_calls),
+                        },
+                    }
                     for i in pl.items
                 ],
             })
