@@ -108,6 +108,43 @@ def _sitemap() -> str:
             f"{urls}</urlset>")
 
 
+
+def _schema_block() -> str:
+    """Разметка товара для поиска: тип, имя, цена, где найти."""
+    data = {
+    "@type": "SoftwareApplication",
+    "name": "agentpay",
+    "applicationCategory": "DeveloperApplication",
+    "operatingSystem": "Any",
+    "description": "Transparent per-call pricing for AI agent resources: tokens, CPU, bytes and external calls priced from published rates with target margin.",
+    "url": "https://rta.lat/agentpay/",
+    "offers": {
+        "@type": "Offer",
+        "price": "0.01",
+        "priceCurrency": "USD"
+    }
+}
+    data["@context"] = "https://schema.org"
+    return ('<script type="application/ld+json">'
+            + json.dumps(data, ensure_ascii=False) + "</script>")
+
+
+def _with_schema(html: str) -> str:
+    """Вставить разметку в HTML. Идемпотентно: повторный вызов не дублирует."""
+    if not isinstance(html, str) or "application/ld+json" in html:
+        return html
+    block = _schema_block()
+    lowered = html.lower()
+    for marker in ("</head>", "<body", "</title>"):
+        pos = lowered.find(marker)
+        if pos != -1:
+            return html[:pos] + block + html[pos:]
+    import re
+    m = re.search(r"<meta[^>]+charset[^>]*>", html, re.IGNORECASE)
+    if m:
+        return html[:m.end()] + block + html[m.end():]
+    return block + html
+
 class Handler(BaseHTTPRequestHandler):
     server_version = "agentpay"
 
@@ -145,7 +182,7 @@ class Handler(BaseHTTPRequestHandler):
         elif path == "/sitemap.xml":
             self._send(200, _sitemap())
         if path == "/":
-            self._send(200, LANDING)
+            self._send(200, _with_schema(LANDING))
         elif path == "/health":
             self._send(200, {"status": "ok", "service": "agentpay"})
         elif path == "/pricing":
